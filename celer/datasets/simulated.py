@@ -3,12 +3,15 @@
 # Thomas Moreau
 
 import numpy as np
+
+from scipy import sparse
 from numpy.linalg import norm
 from sklearn.utils import check_random_state
 
 
 def make_correlated_data(n_samples=100, n_features=50, corr=0.6, snr=3,
-                         density=0.2, w_true=None, random_state=None):
+                         density=0.2, X_density=1, w_true=None,
+                         random_state=None):
     r"""Generate correlated design matrix with decaying correlation rho**|i-j|.
     according to
 
@@ -42,6 +45,10 @@ def make_correlated_data(n_samples=100, n_features=50, corr=0.6, snr=3,
         Signal-to-noise ratio. In np.inf, no noise is added.
     density: float
         Proportion of non zero elements in w_true if it must be simulated.
+    X_density: float
+        Proportion of non zero elements in X. If < 1, X is returned as a scipy
+        sparse CSC matrix. Note that in that case the effective `corr`
+        becomes `X_density * corr`.
     w_true: np.array, shape (n_features,) | None
         True regression coefficients. If None, an array with `nnz` non zero
         standard Gaussian entries is simulated.
@@ -61,12 +68,18 @@ def make_correlated_data(n_samples=100, n_features=50, corr=0.6, snr=3,
     if not 0 <= corr < 1:
         raise ValueError("The correlation `corr` should be chosen in [0, 1[.")
     if not 0 < density <= 1:
-        raise ValueError("The density should be chosen in ]0, 1].")
+        raise ValueError("The density of w should be chosen in ]0, 1].")
+    if not 0 < X_density <= 1:
+        raise ValueError("The density of X should be chosen in ]0, 1].")
     rng = check_random_state(random_state)
     nnz = int(density * n_features)
 
     if corr == 0:
-        X = np.asfortranarray(rng.randn(n_samples, n_features))
+        if X_density == 1:
+            X = np.asfortranarray(rng.randn(n_samples, n_features))
+        else:
+            X = sparse.random(n_samples, n_features,
+                              density=X_density, random_state=rng)
     else:
         # X is generated cleverly using an AR model with reason corr and
         # innovation sigma^2 = 1 - corr ** 2: X[:, j+1] = corr X[:, j] + eps_j
@@ -80,6 +93,12 @@ def make_correlated_data(n_samples=100, n_features=50, corr=0.6, snr=3,
             U *= corr
             U += sigma * rng.randn(n_samples)
             X[:, j] = U
+        if X_density < 1:
+            zeros = rng.choice(n_samples * n_features,
+                               int(n_samples * n_features * (1 - X_density)),
+                               replace=False)
+            X.flat[zeros] = 0
+            X = sparse.csc_matrix(X)
 
     if w_true is None:
         w_true = np.zeros(n_features)
